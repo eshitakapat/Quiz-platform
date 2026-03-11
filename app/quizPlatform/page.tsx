@@ -1,0 +1,374 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { toast } from "react-toastify";
+import { useRouter } from "next/navigation";
+
+type Question = {
+  id: string;
+  questionText: string;
+  options: string[];
+};
+
+export default function QuizPlatform() {
+  const router = useRouter();
+  const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL;
+
+  const TOTAL_TIME_MINUTES = 20;
+  const TOTAL_SECONDS = TOTAL_TIME_MINUTES * 60;
+
+  const STORAGE_KEY = "round2_quiz_progress";
+  const COMPLETED_KEY = "round2_quiz_completed";
+
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [timeLeft, setTimeLeft] = useState(TOTAL_SECONDS);
+
+  const [quizCompleted, setQuizCompleted] = useState(false);
+  const [cheated, setCheated] = useState(false);
+  const [tabChangeCount, setTabChangeCount] = useState(0);
+
+  const currentQuestion = questions[currentIndex];
+  const isLastQuestion = currentIndex === questions.length - 1;
+
+  function getToken() {
+    const cookie = document.cookie
+      .split("; ")
+      .find((row) => row.startsWith("token="));
+
+    if (!cookie) return null;
+    return cookie.split("=")[1];
+  }
+
+  async function reportCheating() {
+    const token = getToken();
+    if (!token) return;
+
+    try {
+      await fetch(`${BACKEND_URL}/round2/cheat`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {}
+  }
+
+  /*
+  AUTH CHECK
+  */
+
+  useEffect(() => {
+    const token = getToken();
+
+    if (!token) {
+      toast.error("Login required");
+      router.replace("/login");
+      return;
+    }
+
+    const completed = localStorage.getItem(COMPLETED_KEY);
+
+    if (completed === "true") {
+      setQuizCompleted(true);
+      return;
+    }
+
+    checkQualification(token);
+  }, []);
+
+  async function checkQualification(token: string) {
+    try {
+      const res = await fetch(`${BACKEND_URL}/round1/status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        toast.error(data.error || "Failed to check qualification");
+        router.replace("/");
+        return;
+      }
+
+      if (!data.qualified) {
+        toast.error("You arent allowed to enter quiz platform");
+        router.replace("/");
+        return;
+      }
+
+      fetchQuestions(token);
+    } catch {
+      toast.error("Server error");
+      router.replace("/");
+    }
+  }
+
+  /*
+  LOAD QUESTIONS
+  */
+
+  async function fetchQuestions(token: string) {
+    try {
+      const res = await fetch(`${BACKEND_URL}/round2/questions`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        toast.error(data.error || "Access denied");
+        router.replace("/");
+        return;
+      }
+
+      setQuestions(data);
+
+      const saved = localStorage.getItem(STORAGE_KEY);
+
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setCurrentIndex(parsed.currentIndex ?? 0);
+        setSelected(parsed.selected ?? null);
+        setTimeLeft(parsed.timeLeft ?? TOTAL_SECONDS);
+      }
+    } catch {
+      toast.error("Failed to load questions");
+      router.replace("/");
+    }
+  }
+
+  /*
+  SAVE PROGRESS
+  */
+
+  useEffect(() => {
+    if (questions.length === 0) return;
+
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        currentIndex,
+        selected,
+        timeLeft,
+      })
+    );
+  }, [currentIndex, selected, timeLeft, questions]);
+
+  /*
+  TAB SWITCH DETECTION
+  */
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setTabChangeCount((prev) => prev + 1);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
+
+  /*
+  HANDLE CHEATING
+  */
+
+  useEffect(() => {
+    if (tabChangeCount === 0) return;
+
+    toast.warning(`Tab switched ${tabChangeCount} time(s)`);
+
+    if (tabChangeCount >= 3) {
+      localStorage.removeItem(STORAGE_KEY);
+
+      toast.error("Cheating detected. Quiz terminated.");
+
+      reportCheating();
+
+      setCheated(true);
+      setQuizCompleted(true);
+
+      setTimeout(() => {
+        router.replace("/");
+      }, 2000);
+    }
+  }, [tabChangeCount]);
+
+  /*
+  TIMER
+  */
+
+  useEffect(() => {
+    if (quizCompleted) return;
+
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+
+          localStorage.setItem(COMPLETED_KEY, "true");
+          localStorage.removeItem(STORAGE_KEY);
+
+          toast.info("Time is up. Quiz submitted automatically.");
+
+          setQuizCompleted(true);
+
+          return 0;
+        }
+
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [quizCompleted]);
+
+  /*
+  SUBMIT ANSWER
+  */
+
+  async function submitAnswer(answer: string) {
+    const token = getToken();
+
+    if (!token) {
+      router.replace("/login");
+      return;
+    }
+
+    await fetch(`${BACKEND_URL}/round2/answer`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        questionId: currentQuestion.id,
+        answer,
+      }),
+    });
+  }
+
+  const handleContinue = async () => {
+    if (selected === null) {
+      toast.error("Select an option first");
+      return;
+    }
+
+    try {
+      await submitAnswer(currentQuestion.options[selected]);
+
+      if (isLastQuestion) {
+        localStorage.setItem(COMPLETED_KEY, "true");
+        localStorage.removeItem(STORAGE_KEY);
+
+        toast.success("Quiz submitted");
+
+        setQuizCompleted(true);
+        return;
+      }
+
+      setCurrentIndex((prev) => prev + 1);
+      setSelected(null);
+    } catch {
+      toast.error("Failed to submit answer");
+    }
+  };
+
+  function formatTime(sec: number) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+
+    return `${m.toString().padStart(2, "0")}:${s
+      .toString()
+      .padStart(2, "0")}`;
+  }
+
+  /*
+  UI STATES
+  */
+
+  if (quizCompleted) {
+    if (cheated) {
+      return (
+        <div className="h-[calc(100vh-44px)] flex items-center justify-center bg-[#e5e5e5]">
+          <div className="w-[600px] border-4 border-black bg-[#d9d9d9] p-10 text-center shadow-[10px_10px_0px_black]">
+            <h1 className="text-3xl font-bold mb-4">QUIZ TERMINATED</h1>
+            <p className="text-lg">
+              Tab switching detected. You are disqualified.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="h-[calc(100vh-44px)] flex items-center justify-center bg-[#e5e5e5]">
+        <div className="w-[600px] border-4 border-black bg-[#d9d9d9] p-10 text-center shadow-[10px_10px_0px_black]">
+          <h1 className="text-3xl font-bold mb-4">QUIZ COMPLETED</h1>
+          <p className="text-lg">Thank you for giving the quiz.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (questions.length === 0) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        Loading questions...
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-[calc(100vh-44px)] flex items-center justify-center bg-[#e5e5e5]">
+      <div className="w-[900px] border-4 border-black bg-[#d9d9d9] p-10 shadow-[10px_10px_0px_black]">
+
+        <h2 className="font-bold text-lg mb-3">
+          QUESTION {currentIndex + 1}
+        </h2>
+
+        <p className="text-lg mb-6">
+          {currentQuestion.questionText}
+        </p>
+
+        <div className="space-y-4">
+          {currentQuestion.options.map((opt, i) => (
+            <div
+              key={i}
+              onClick={() => setSelected(i)}
+              className={`border-2 border-black p-3 cursor-pointer ${
+                selected === i
+                  ? "bg-lime-400"
+                  : "bg-[#cfcfcf] hover:bg-[#bdbdbd]"
+              }`}
+            >
+              <span className="font-semibold">Option {i + 1}</span> — {opt}
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-8 text-center">
+          <button
+            onClick={handleContinue}
+            className="bg-yellow-400 px-8 py-2 border-2 border-black font-semibold"
+          >
+            {isLastQuestion ? "Submit" : "Continue"}
+          </button>
+        </div>
+
+        <div className="mt-10 text-center">
+          <div className="bg-black text-white px-6 py-2 inline-block font-bold">
+            TIME IS RUNNING OUT!!
+          </div>
+
+          <div className="mt-4 bg-purple-600 text-lime-300 text-4xl font-bold px-8 py-3 border-4 border-black inline-block">
+            {formatTime(timeLeft)}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
