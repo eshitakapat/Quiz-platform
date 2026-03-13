@@ -6,18 +6,6 @@ export default function PlayerLogin() {
       <LoginCard
         bgColour="#AEEBFF"
         title="Welcome back, user!"
-        fields={[
-          {
-            label: "KIIT Email-ID",
-            type: "email",
-            placeholder: "loremipsum@kiit.ac.in",
-          },
-          {
-            label: "Password",
-            type: "password",
-            placeholder: "Enter password",
-          },
-        ]}
         buttonText="Login"
         buttonColour="#8EB3E4"
       />
