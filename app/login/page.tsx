@@ -2,7 +2,7 @@ import LoginCard from "../../components/LoginCard";
 
 export default function PlayerLogin() {
   return (
-    <div className="flex justify-center items-center mt-33">
+    <div className="flex justify-center items-center mt-33 bg-white">
       <LoginCard
         bgColour="#AEEBFF"
         title="Welcome back, user!"
