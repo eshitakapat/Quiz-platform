@@ -18,7 +18,7 @@ export default function Page() {
       
       <div className="bg-[#00FFA3] border-4 border-black px-8 py-6 md:px-16 md:py-8 mb-10 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] text-center transform -rotate-2 hover:rotate-0 transition-transform">
         <h1 className="text-3xl md:text-5xl font-black uppercase tracking-tight text-black mb-2">
-          WELCOME SHINOBI!!!
+          WELCOME!!!
         </h1>
         <h2 className="text-xl md:text-2xl font-bold uppercase tracking-wider text-black">
           To The Quiz Platform
